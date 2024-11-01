@@ -2,6 +2,15 @@
 dataset_type = 'LVISV05Dataset'
 data_root = 'data/lvis_v0.5/'
 
+syn_data_root = 'data/lvis-gen/lvis-aigc-thing/'
+syn_add = False
+syn_aug = True
+syn_aug_ratio = 0.5
+syn_method_prob = None
+
+work_dir = 'work_dirs/synthetic_lvis/faster_rcnn_r50_fpn_2x_lvis_thing_aug'
+
+
 # Example to use different file client
 # Method 1: simply set the data root and let the file I/O module
 # automatically infer from prefix (not support LMDB and Memcache yet)
@@ -50,6 +59,11 @@ train_dataloader = dict(
         dataset=dict(
             type=dataset_type,
             data_root=data_root,
+            syn_data_root=syn_data_root,
+            syn_add=syn_add,
+            syn_aug=syn_aug,
+            syn_aug_ratio=syn_aug_ratio,
+            syn_method_prob=syn_method_prob,
             ann_file='annotations/lvis_v0.5_train.json',
             data_prefix=dict(img='train2017/'),
             filter_cfg=dict(filter_empty_gt=True, min_size=32),

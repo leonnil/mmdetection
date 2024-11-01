@@ -1,6 +1,19 @@
 # dataset settings
 dataset_type = 'CocoDataset'
+# data_root = 'data/coco-gen2/coco-bg-inv/'
 data_root = 'data/coco/'
+# data_root = 'data/coco-gen2/coco-cp-sd-xl/'
+# syn_data_root = ''
+syn_data_root = 'data/coco-gen2/coco-aigc-thing/'
+syn_add = False
+syn_aug = True
+syn_aug_ratio = 0.5
+syn_method_prob = None
+# syn_aug_ratio = 1/2
+# syn_method_prob = [1/5] + [1/5] + [1/15] * 3 + [1/20] * 4 + [1/20] * 4
+
+work_dir = 'work_dirs/synthetic_coco/dino_r50_fpn_2x_coco_thing_aug'
+# work_dir = 'work_dirs/faster-rcnn_r50_fpn_1x_coco_mini_pct80'
 
 # Example to use different file client
 # Method 1: simply set the data root and let the file I/O module
@@ -43,6 +56,11 @@ train_dataloader = dict(
     dataset=dict(
         type=dataset_type,
         data_root=data_root,
+        syn_data_root=syn_data_root,
+        syn_add=syn_add,
+        syn_aug=syn_aug,
+        syn_aug_ratio=syn_aug_ratio,
+        syn_method_prob=syn_method_prob,
         ann_file='annotations/instances_train2017.json',
         data_prefix=dict(img='train2017/'),
         filter_cfg=dict(filter_empty_gt=True, min_size=32),
@@ -68,7 +86,8 @@ val_evaluator = dict(
     type='CocoMetric',
     ann_file=data_root + 'annotations/instances_val2017.json',
     metric='bbox',
-    format_only=False,
+    # format_only=True,
+    # outfile_prefix='data/coco-mini/predictions/train_cp',
     backend_args=backend_args)
 test_evaluator = val_evaluator
 

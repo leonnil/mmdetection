@@ -1,8 +1,10 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import copy
 import os.path as osp
-from typing import List, Union
+import glob
+from typing import List, Union, Any
 
+from numpy import random
 from mmengine.fileio import get_local_path
 
 from mmdet.registry import DATASETS
@@ -55,6 +57,44 @@ class CocoDataset(BaseDetDataset):
     COCOAPI = COCO
     # ann_id is unique in coco dataset.
     ANN_ID_UNIQUE = True
+    
+    def __init__(self, *args, 
+                 syn_data_root: str = '',
+                 syn_data_prefix: dict = {},
+                 syn_data_num: int = 2,
+                 syn_add: bool = False,
+                 syn_aug: bool = False,
+                 syn_aug_ratio: float = 0.5,
+                 syn_method_prob: List[float] = None,
+                 **kwargs) -> None:
+        if not syn_data_prefix:
+            syn_data_prefix = kwargs['data_prefix']
+        self.syn_data_root = [root for root in sorted(glob.glob(syn_data_root))
+                              if osp.isdir(root)
+                              and osp.exists(osp.join(root, kwargs['ann_file']))
+                              and osp.exists(osp.join(root, syn_data_prefix['img']))]
+        
+        self.syn_ann_file = []
+        self.syn_data_prefix = []
+        self.syn_suffixes = []
+        for root in self.syn_data_root:
+            if "aigc" in root:
+                self.syn_ann_file.extend([osp.join(root, kwargs['ann_file'].split('.')[0] + f'-{i:02d}.json') for i in range(syn_data_num)])
+                self.syn_data_prefix.extend([osp.join(root, syn_data_prefix['img'])] * syn_data_num)
+                self.syn_suffixes.extend([f'-{i:02d}.jpg' for i in range(syn_data_num)])
+            else:
+                self.syn_ann_file.append(osp.join(root, kwargs['ann_file']))
+                self.syn_data_prefix.append(osp.join(root, syn_data_prefix['img']))
+                self.syn_suffixes.append('.jpg')
+
+        self.syn_data_num = syn_data_num
+        self.syn_add = syn_add
+        self.syn_aug = syn_aug
+        self.syn_aug_ratio = syn_aug_ratio
+        if syn_data_root:
+            self.syn_method_prob = syn_method_prob
+
+        super().__init__(*args, **kwargs)
 
     def load_data_list(self) -> List[dict]:
         """Load annotations from an annotation file named as ``self.ann_file``
@@ -65,6 +105,13 @@ class CocoDataset(BaseDetDataset):
         with get_local_path(
                 self.ann_file, backend_args=self.backend_args) as local_path:
             self.coco = self.COCOAPI(local_path)
+        if self.syn_data_root:
+            print(f"Load Synthetic Data from {self.syn_ann_file} with prob {self.syn_method_prob}")
+            self.coco_syn = []
+            for syn_ann_file in self.syn_ann_file:
+                with get_local_path(
+                        syn_ann_file, backend_args=self.backend_args) as local_path:
+                    self.coco_syn.append(self.COCOAPI(local_path))
         # The order of returned `cat_ids` will not
         # change with the order of the `classes`
         self.cat_ids = self.coco.get_cat_ids(
@@ -89,13 +136,41 @@ class CocoDataset(BaseDetDataset):
                 'raw_img_info':
                 raw_img_info
             })
+            parsed_data_info['is_syn'] = False
             data_list.append(parsed_data_info)
+
+            if self.syn_data_root and self.syn_add:
+                for syn_idx in range(len(self.syn_ann_file)):
+                    coco_syn = self.coco_syn[syn_idx]
+                    syn_data_prefix = self.syn_data_prefix[syn_idx]
+                    syn_suffix = self.syn_suffixes[syn_idx]
+                    
+                    raw_img_info = coco_syn.load_imgs([img_id])[0]
+                    raw_img_info['img_id'] = img_id
+
+                    ann_ids = coco_syn.get_ann_ids(img_ids=[img_id])
+                    raw_ann_info = coco_syn.load_anns(ann_ids)
+
+                    parsed_data_info = self.parse_data_info({
+                        'raw_ann_info':
+                        raw_ann_info,
+                        'raw_img_info':
+                        raw_img_info
+                    })
+                    parsed_data_info['is_syn'] = True
+                    parsed_data_info['img_path'] = osp.join(syn_data_prefix, 
+                                                                raw_img_info['file_name'].rsplit('.', 1)[0] + syn_suffix)
+                    data_list.append(parsed_data_info)
+
         if self.ANN_ID_UNIQUE:
             assert len(set(total_ann_ids)) == len(
                 total_ann_ids
             ), f"Annotation ids in '{self.ann_file}' are not unique!"
 
         del self.coco
+        if self.syn_data_root and self.syn_add:
+            for coco_syn in self.coco_syn:
+                del coco_syn
 
         return data_list
 
@@ -115,6 +190,8 @@ class CocoDataset(BaseDetDataset):
 
         # TODO: need to change data_prefix['img'] to data_prefix['img_path']
         img_path = osp.join(self.data_prefix['img'], img_info['file_name'])
+        # if not osp.exists(img_path):
+        #     img_path = osp.join(self.data_prefix['img'], img_info['file_name'].rsplit('.', 1)[0] + '_00.jpg')
         if self.data_prefix.get('seg', None):
             seg_map_path = osp.join(
                 self.data_prefix['seg'],
@@ -199,3 +276,41 @@ class CocoDataset(BaseDetDataset):
                 valid_data_infos.append(data_info)
 
         return valid_data_infos
+    
+    def prepare_data(self, idx) -> Any:
+        """Get data processed by ``self.pipeline``.
+
+        Args:
+            idx (int): The index of ``data_info``.
+
+        Returns:
+            Any: Depends on ``self.pipeline``.
+        """
+        data_info = self.get_data_info(idx)
+
+        if self.syn_data_root and self.syn_aug and random.random() < self.syn_aug_ratio:
+            img_id = data_info['img_id']
+            syn_idx = random.choice(len(self.syn_data_root), p=self.syn_method_prob)
+            coco_syn = self.coco_syn[syn_idx]
+            syn_data_root = self.syn_data_root[syn_idx]
+            syn_data_prefix = self.syn_data_prefix[syn_idx]
+            
+            raw_img_info = coco_syn.load_imgs([img_id])[0]
+            raw_img_info['img_id'] = img_id
+
+            ann_ids = coco_syn.get_ann_ids(img_ids=[img_id])
+            raw_ann_info = coco_syn.load_anns(ann_ids)
+
+            parsed_data_info = self.parse_data_info({
+                'raw_ann_info':
+                raw_ann_info,
+                'raw_img_info':
+                raw_img_info
+            })
+
+            syn_suffixes = ['-00.jpg', '-01.jpg'] if 'aigc' in syn_data_root else ['.jpg']
+            syn_suffix = random.choice(syn_suffixes) if 'aigc' not in syn_data_root else syn_suffixes[syn_idx]
+            parsed_data_info['img_path'] = osp.join(syn_data_prefix, raw_img_info['file_name'].rsplit('.', 1)[0] + syn_suffix)
+            data_info = parsed_data_info
+
+        return self.pipeline(data_info)

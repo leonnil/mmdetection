@@ -2,6 +2,7 @@
 from typing import Sequence
 
 from torch.utils.data import BatchSampler, Sampler
+import torch
 
 from mmdet.datasets.samplers.track_img_sampler import TrackImgSampler
 from mmdet.registry import DATA_SAMPLERS
@@ -24,6 +25,7 @@ class AspectRatioBatchSampler(BatchSampler):
     def __init__(self,
                  sampler: Sampler,
                  batch_size: int,
+                 syn_sample_p: float = 0.0,
                  drop_last: bool = False) -> None:
         if not isinstance(sampler, Sampler):
             raise TypeError('sampler should be an instance of ``Sampler``, '
@@ -34,14 +36,20 @@ class AspectRatioBatchSampler(BatchSampler):
         self.sampler = sampler
         self.batch_size = batch_size
         self.drop_last = drop_last
+        self.syn_sample_p = syn_sample_p
         # two groups for w < h and w >= h
-        self._aspect_ratio_buckets = [[] for _ in range(2)]
+        self._aspect_ratio_buckets = [[] for _ in range(4)]
+
 
     def __iter__(self) -> Sequence[int]:
         for idx in self.sampler:
             data_info = self.sampler.dataset.get_data_info(idx)
+            is_syn = data_info.get('is_syn', False)
             width, height = data_info['width'], data_info['height']
-            bucket_id = 0 if width < height else 1
+            if not is_syn:
+                bucket_id = 0 if width < height else 1
+            else:
+                bucket_id = 2 if width < height else 3
             bucket = self._aspect_ratio_buckets[bucket_id]
             bucket.append(idx)
             # yield a batch of indices in the same aspect ratio group
@@ -51,8 +59,8 @@ class AspectRatioBatchSampler(BatchSampler):
 
         # yield the rest data and reset the bucket
         left_data = self._aspect_ratio_buckets[0] + self._aspect_ratio_buckets[
-            1]
-        self._aspect_ratio_buckets = [[] for _ in range(2)]
+            1] + self._aspect_ratio_buckets[2] + self._aspect_ratio_buckets[3]
+        self._aspect_ratio_buckets = [[] for _ in range(4)]
         while len(left_data) > 0:
             if len(left_data) <= self.batch_size:
                 if not self.drop_last:

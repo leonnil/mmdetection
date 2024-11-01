@@ -7,10 +7,12 @@ from .custom_sample_size_sampler import CustomSampleSizeSampler
 from .multi_data_sampler import MultiDataSampler
 from .multi_source_sampler import GroupMultiSourceSampler, MultiSourceSampler
 from .track_img_sampler import TrackImgSampler
+from .synthetic_sampler import SyntheticDataSampler
 
 __all__ = [
     'ClassAwareSampler', 'AspectRatioBatchSampler', 'MultiSourceSampler',
     'GroupMultiSourceSampler', 'TrackImgSampler',
     'TrackAspectRatioBatchSampler', 'MultiDataSampler',
-    'MultiDataAspectRatioBatchSampler', 'CustomSampleSizeSampler'
+    'MultiDataAspectRatioBatchSampler', 'CustomSampleSizeSampler',
+    'SyntheticDataSampler'
 ]
